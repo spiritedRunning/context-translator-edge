@@ -1,138 +1,74 @@
 # Context Translator
 
-一个基于 AI API 的 Microsoft Edge 翻译插件
+AI 翻译 Edge 插件，基于你自己的 OpenAI 兼容 API，支持上下文会话和划词固定搭配（collocation）讲解。
 
-鼠标悬停段落并按触发键，即可在原文下方嵌入显示译文；选定文字后，选区旁会自动出现一个蓝色翻译按钮（也可直接按触发键），点击后在悬浮窗内查看译文——若选中的英文里存在真正有学习价值的固定搭配（collocation），悬浮窗还会额外给出「Collocations:」搭配讲解。也可经右键菜单把选定文字加入上下文（Add to context），或不选文字时手输指引（Add instruction）喂给当前页的翻译会话。所有翻译共享一个按页面绑定的会话，累积上下文以帮助模型理解语境。
+## 功能
 
-与其他翻译插件的差异？支持上下文，支持使用你自己的 API（包括本地部署的 Ollama），以极低的价格获取高质量的翻译结果。
+- **悬停翻译**：光标悬停 + 触发键（默认 `Alt`），译文嵌入原文下方，保留原始格式；按段落缓存，不重复请求。
+- **划词翻译 + 搭配讲解**：选中文字后翻译；若原文中有值得学习的固定搭配，附带「Collocations:」讲解。
+- **按页面的上下文会话**：同页多次翻译共享上下文；也可通过右键菜单手动补充背景或指引（Add to context / Add instruction）。
+- **流式输出**，支持思考模式（需模型原生支持，见下方配置）。
+- **任意 OpenAI 兼容端点**：DeepSeek、OpenAI、本地 Ollama 等。
 
-## 核心功能
+## 安装
 
-- **悬停翻译**：鼠标悬停在某段文字上，轻按触发键（默认 `Alt`），译文会直接嵌在原文下方——无文本框、无背景，字体格式与原文一致；再按一次隐藏，再按一次显示（使用缓存，不重复请求）。
-- **划线翻译 + 搭配讲解**：选定一段文字后，选区旁会自动出现蓝色翻译按钮（几秒后自动消失），点击（或按触发键）可在选区附近的悬浮窗内查看译文；如果选中文本里有值得学习的固定搭配，还会在译文后追加一段「Collocations:」列表，逐项给出原文搭配及中文解释（每次新请求，不缓存；输出格式可在设置页自定义）。
-- **加上下文（Add to context）**：选定一段文字，右键点「Add to context」，这段文字不会立刻翻译，而是加入当前页面的会话上下文，随下一次翻译一起发给模型，帮助它理解语境（尤其适合翻译短句时补充背景）。
-- **补指引（Add instruction）**：不选择任何文字时，右键点「Add instruction」，弹出输入框手输一段指引（术语/背景/语气），加入当前页面会话上下文，随下一次翻译一起发出。
-- **按页面绑定的会话**：每个标签页维护一份独立的翻译会话（刷新即重置）。同一页面内多次翻译会带上前文，模型能借助上下文给出更连贯的译文。
-- **流式输出 + 思考提示**：翻译按 token 逐字显示；等待首字期间显示加载动画——若模型正在进行（原生支持的）推理，会先显示 `Thinking...`，模型开始输出正文后自动切换为实际内容。
-- **内联格式保留**：译文保留原文的链接、代码等内联格式，与原文排版一致。
-- **OpenAI 兼容端点**：可接入任意 OpenAI 兼容的 chat completions 服务，包括 DeepSeek、OpenAI，以及本地部署的 Ollama 等，可自定义模型与自定义提示词（系统提示词为内置常量、不可改）。
+### 方式一：下载 Release
 
-## 用法
+1. [Releases](https://github.com/spiritedRunning/context-translator-edge/releases) 下载最新 zip 并解压
+2. `edge://extensions` → 开启「开发人员模式」→「加载解压缩的扩展」→ 选择解压出的文件夹
 
-### 1. 配置
-
-- 点击工具栏扩展图标 → 弹窗里选择**目标语言**（默认简体中文）。
-- 点击弹窗里的「**设置…**」打开设置页，填写：
-  - **Base URL**：留空即用默认 `https://api.deepseek.com`（DeepSeek 为首要后端，可改其他 OpenAI 兼容端点；填 `http://localhost:11434` 之类的本地地址会自动识别为 Ollama 并适配其接口路径）
-  - **API Key**：远程服务（如 DeepSeek、OpenAI）必填；本地服务（如 Ollama）可留空
-  - **Model**：留空即用默认 `deepseek-v4-flash`（也可 `deepseek-v4-pro` 或其他）
-  - **触发键**：`Alt` / `Shift` / `Ctrl` 三选一（默认 `Alt`）
-  - **思考模式**：开关（默认关）。**需要模型原生支持思考/推理能力**——DeepSeek 系列、Ollama 上的 Qwen 3、DeepSeek R1 等支持；Qwen 2.5 等普通对话模型不支持，切换开关对它们没有任何效果。开启后模型会先内部推理再给出译文，等待首字期间会显示 `Thinking...`，首字会更久，且会额外消耗思维链 token（按输出计费）。
-  - **思考强度**：`Low` / `Medium` / `High` / `Max` 单选（默认 `Low`）。仅思考模式开启时可选；不同后端对强度档位的支持程度不同（如 DeepSeek 实际仅 `High` / `Max` 生效，`Low` / `Medium` 会被当作 `High`）。
-  - **自定义提示词（Custom Prompt）**：用户补充指引（领域/术语/语气），默认空；折入每个页面会话首条翻译的 `<user-instruction>` 块，作为建议性指引、不能覆盖内置系统提示词。
-  - **划词结果提示词**：控制划线翻译悬浮窗的输出格式（译文 + 搭配讲解），与思考模式无关。默认要求译文在前、搭配讲解在后（标题固定为 `Collocations:`），可按需改写；留空会自动回退到内置默认值。
-  - **最大上下文（K）**：模型的上下文窗口（K tokens），默认 `1000`（= 1M，对应 `deepseek-v4-flash`）；API 不返回该值，需手填，作为弹窗「Context 用量」仪表的分母；非正值回退 1000K。
-- 保存即可。端点 / Key / 模型 / 思考模式 / 思考强度 / 最大上下文的改动**即时生效**；触发键、自定义提示词、划词结果提示词对**新加载的页面**生效（已打开的页面刷新一次即可）。
-
-### 2. 悬停翻译
-
-鼠标悬停在某段文字上 → 轻按触发键 → 译文出现在原文下方。再按一次隐藏，再按一次显示（缓存）。
-
-> 若悬停的文字已是目标语言（如目标为中文时悬停中文），扩展会自动跳过、不发起翻译——按触发键无反应属正常，并非故障。
-
-### 3. 划线翻译
-
-选定一段文字 → 点击选区旁自动出现的蓝色翻译按钮（或直接按触发键）→ 悬浮窗显示译文；若原文中存在值得学习的固定搭配，译文下方会空一行并追加「Collocations:」讲解。
-
-### 4. 加上下文（Add to context）
-
-选定一段文字 → 右键 →「Add to context」→ 该文字加入当前页面会话的上下文，随下一次翻译一起发出。
-
-### 5. 补指引（Add instruction）
-
-不选择任何文字 → 右键 →「Add instruction」→ 弹出输入框，输入术语/背景/语气等指引并提交 → 加入当前页面会话上下文，随下一次翻译一起发出。
-
-> 会话按页面绑定：刷新页面会重置会话与上下文。
-
-## 从 Release 安装
-
-1. 到 [Releases 页](https://github.com/spiritedRunning/context-translator-edge/releases) 下载最新 `context-translator-<version>.zip`
-2. 解压，得到 `context-translator-<version>/` 文件夹
-3. 打开 `edge://extensions` → 左下角开启「**开发人员模式**」
-4. 点「**加载解压缩的扩展**（Load unpacked）」→ 选择解压出的文件夹
-5. 点工具栏图标 →「**设置…**」填端点 / API Key / 模型 → 保存
-
-> Edge 不允许直接安装未上架的扩展包，因此通过「加载解压缩的扩展」使用下载的 zip。
-
-## 构建并加入 Edge
-
-### 步骤
-
-1. **克隆仓库**
-
-   ```bash
-   git clone https://github.com/spiritedRunning/context-translator-edge.git
-   cd context-translator-edge
-   ```
-
-2. **安装依赖**
-
-   ```bash
-   npm install
-   ```
-
-3. **构建生产产物**
-
-   ```bash
-   npm run build
-   ```
-
-   构建产物输出在 `dist/` 目录。
-
-4. **加载到 Edge**
-
-   - 打开 `edge://extensions`
-   - 左下角开启「**开发人员模式**」
-   - 点击「**加载解压缩的扩展**」，选择项目下的 `dist` 目录
-   - 扩展出现在列表中，工具栏会显示 Context Translator 图标
-
-5. **配置并使用**
-
-   - 点击工具栏图标 → 选择目标语言 → 点击「设置…」填入端点 / API Key / 模型 → 保存
-   - 打开任意网页，悬停段落并按 `Alt` 即可翻译
-
-### 更新到新版本
-
-拉取最新代码后重新构建，再到 `edge://extensions` 点击扩展卡片上的「刷新」按钮：
+### 方式二：从源码构建
 
 ```bash
-git pull
+git clone https://github.com/spiritedRunning/context-translator-edge.git
+cd context-translator-edge
+npm install
 npm run build
 ```
 
-## 接入其他模型时的注意事项
+`edge://extensions` → 开启「开发人员模式」→「加载解压缩的扩展」→ 选择 `dist/` 目录。
 
-不同 OpenAI 兼容后端对「思考/推理」参数的支持方式不一样，扩展会按 Base URL 自动识别并适配，但接入新模型或新后端时仍建议留意：
+更新：`git pull && npm run build`，再到 `edge://extensions` 点该扩展的「刷新」。
 
-- **DeepSeek**（`api.deepseek.com` 或兼容中转域名）：请求体带 `thinking: {type: "enabled"|"disabled"}`；关闭思考模式必须显式传 `disabled`，因为 DeepSeek 在该字段缺失时默认按「已开启」处理。
-- **Ollama**（`http://localhost:11434` 等本地地址，端口 `11434`）：请求体改用 `reasoning_effort`（`none` / `low` / `medium` / `high` / `max`），关闭思考模式对应 `"none"`。**不是所有 Ollama 模型都支持这个字段**——Qwen 3、DeepSeek R1、QwQ 等推理模型支持，Qwen 2.5 等普通对话模型不支持，此时切换思考模式开关不会有任何效果、也不会报错。本地端点可不填 API Key。
-- **其他 OpenAI 兼容服务**（自建中转、其他云端 API 等）：默认发送 `reasoning_effort`。未识别的字段一般会被后端静默忽略、不会报错，但具体行为仍取决于服务商的实现，建议先用一小段文字测试确认思考模式是否真的生效。
-- 划线悬浮窗里的「搭配讲解（Collocations）」质量很依赖模型本身的指令遵循能力：参数量较小或非推理模型（如 Qwen2.5:14b）偶尔会漏掉真正值得讲解的搭配，或把普通单词/短语误列为搭配。扩展在前端做了一些兜底过滤（丢弃孤立单词条目、去除 Markdown 加粗等），但无法保证 100% 准确；如果这部分对你比较重要，建议换用支持思考模式的推理模型并开启思考模式。
+## 配置
+
+工具栏图标 →「设置…」：
+
+| 字段 | 说明 |
+|---|---|
+| Base URL | OpenAI 兼容端点，默认 `https://api.deepseek.com` |
+| API Key | 远程服务必填；本地服务（Ollama）可留空 |
+| Model | 默认 `deepseek-v4-flash` |
+| 触发键 | `Alt` / `Shift` / `Ctrl`，默认 `Alt` |
+| 思考模式 | 需模型原生支持推理（见下）；开启后延迟增加、消耗额外 token |
+| 自定义提示词 / 划词结果提示词 | 分别控制通用翻译与划词面板的输出，可选填 |
+| 最大上下文（K） | 模型上下文窗口，用于弹窗用量显示 |
+
+端点 / Key / 模型 / 思考模式即时生效；触发键与各类提示词需刷新已打开页面生效。
+
+### 接入 Ollama
+
+1. 本地启动 Ollama（默认监听 `http://localhost:11434`）
+2. Base URL 填 `http://localhost:11434`（会自动识别为本地端点并拼上 `/v1/chat/completions`），API Key 留空
+3. Model 填 Ollama 里已 `pull` 的模型名，如 `qwen3:8b`
+4. 思考模式仅对支持推理的模型生效，如 Qwen 3、DeepSeek R1、QwQ；Qwen 2.5 等基础对话模型不支持，开关不会报错但也没有效果
+
+### 接入其他 OpenAI 兼容服务
+
+Base URL 填对应端点即可。服务商未识别的思考相关字段通常会被静默忽略，建议先用一小段文字测试，确认思考模式是否真的生效。
+
+## 隐私
+
+API Key 仅存于本地浏览器扩展存储，不同步、不上传（除发送给你配置的 LLM 端点外）；翻译内容只发送到你配置的端点。
 
 ## 开发
 
-- `npm run dev`：启动 Vite 开发模式（加载 `dist` 后支持热更新）。
-- `npm run typecheck`：TypeScript 类型检查。
-- `npm run build`：生产构建到 `dist/`。
+- `npm run dev` — 开发模式
+- `npm run typecheck` — 类型检查
+- `npm run build` — 生产构建到 `dist/`
 
-## 隐私与备注
-
-- API Key 仅存于本地的浏览器扩展存储（`chrome.storage.local` API，Edge 等 Chromium 内核浏览器通用），不会进入浏览器同步，也不会上传到任何第三方服务（除你配置的 LLM 端点外）。
-- 翻译内容会发送到你配置的 LLM 端点进行翻译，不上传到其他地方。
-- 会话按页面绑定、不自动截断以保持上下文连贯，刷新页面即重置。
-
-## 特别鸣谢
+## 致谢
 
 - Claude Code
 - GLM-5.2
-- Deepseek V4
+- DeepSeek V4
