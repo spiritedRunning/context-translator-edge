@@ -57,18 +57,8 @@ npm run build
 
 Base URL 填对应端点即可。服务商未识别的思考相关字段通常会被静默忽略，建议先用一小段文字测试，确认思考模式是否真的生效。
 
-## 隐私
-
-API Key 仅存于本地浏览器扩展存储，不同步、不上传（除发送给你配置的 LLM 端点外）；翻译内容只发送到你配置的端点。
-
 ## 开发
 
 - `npm run dev` — 开发模式
 - `npm run typecheck` — 类型检查
 - `npm run build` — 生产构建到 `dist/`
-
-## 致谢
-
-- Claude Code
-- GLM-5.2
-- DeepSeek V4
