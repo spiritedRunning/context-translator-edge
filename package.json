@@ -3,7 +3,7 @@
   "version": "0.1.5",
   "private": true,
   "type": "module",
-  "description": "AI-powered hover/selection translation Chrome extension with a per-page context session.",
+  "description": "AI-powered hover/selection translation browser extension for Microsoft Edge, with a per-page context session.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

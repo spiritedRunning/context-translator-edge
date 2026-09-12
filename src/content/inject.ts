@@ -56,6 +56,14 @@ const STYLE_TEXT = `
 .ct-instr-submit{all:unset;font-family:var(--ct-sans);font-size:.82rem;font-weight:600;color:#fff;
   background:var(--ct-accent);border-radius:6px;padding:7px 14px;cursor:pointer;align-self:flex-start}
 .ct-instr-submit:hover{filter:brightness(1.06)}
+.ct-selection-trigger{all:unset;width:30px;height:30px;box-sizing:border-box;display:grid;place-items:center;
+  border-radius:9px;background:linear-gradient(145deg,#3158c9,#7446d7);border:1px solid rgba(255,255,255,.78);
+  box-shadow:0 4px 14px rgba(49,55,110,.3),0 1px 3px rgba(0,0,0,.2);cursor:pointer;color:#fff;
+  transition:transform .12s ease,box-shadow .12s ease,background .12s ease}
+.ct-selection-trigger:hover{background:linear-gradient(145deg,#274bb8,#6637ca);transform:translateY(-1px);box-shadow:0 6px 18px rgba(49,55,110,.4)}
+.ct-selection-trigger:active{transform:translateY(0) scale(.96)}
+.ct-selection-trigger:focus-visible{outline:2px solid #3158c9;outline-offset:2px}
+.ct-selection-trigger svg{display:block;width:21px;height:21px}
 @keyframes ct-rise{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 @keyframes ct-blink{50%{opacity:0}}
 `;
@@ -79,6 +87,9 @@ interface Handlers {
   onChunk: (full: string) => void;
   onDone: (full: string, usage: Usage) => void;
   onError: (msg: string) => void;
+  /** Fired (possibly repeatedly) while the model is emitting reasoning tokens, before any
+   *  visible content chunk has arrived. Optional: most callers just show a placeholder. */
+  onReasoning?: () => void;
 }
 let reqCounter = 0;
 function stream(kind: 'translate' | 'compress', messages: ChatMessage[], h: Handlers): void {
@@ -90,6 +101,7 @@ function stream(kind: 'translate' | 'compress', messages: ChatMessage[], h: Hand
   port.onMessage.addListener((evt: StreamEvent) => {
     if (evt.requestId !== requestId || settled) return;
     if (evt.kind === 'chunk') { buffer += evt.delta; h.onChunk(buffer); }
+    else if (evt.kind === 'reasoning') { h.onReasoning?.(); }
     else if (evt.kind === 'done') { settled = true; h.onDone(evt.fullText || buffer, evt.usage); try { port.disconnect(); } catch { /* closed */ } }
     else if (evt.kind === 'error') { settled = true; h.onError(evt.message); try { port.disconnect(); } catch { /* closed */ } }
   });
@@ -113,6 +125,7 @@ function runFlight(kind: 'translate' | 'compress', build: () => ChatMessage[], h
       try { messages = build(); } catch { resolve(); return; }
       stream(kind, messages, {
         onChunk: h.onChunk,
+        onReasoning: h.onReasoning,
         onDone: (full, usage) => { h.onDone(full, usage); resolve(); },
         onError: (msg) => { h.onError(msg); resolve(); },
       });
@@ -126,6 +139,34 @@ function runFlight(kind: 'translate' | 'compress', build: () => ChatMessage[], h
 // translated children — so links/code keep the page's styling and attributes (CT-010).
 function stripTags(s: string): string {
   return s.replace(/<\/?[a-zA-Z][^>]*>/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/** Keep selection-panel formatting stable even when a smaller local model only partially follows
+ *  the output prompt. A final no-collocation notice is intentionally removed rather than shown. */
+function normalizeSelectionResult(text: string): string {
+  // The panel renders plain text (no Markdown), so strip stray emphasis markers a model adds
+  // despite being told to output plain text — otherwise literal "**" leak into the display.
+  let result = text.replace(/\*\*/g, '').replace(/(^|\n)[ \t]*#{1,6}[ \t]*/g, '$1');
+  result = result.replace(
+    /(^|\n)[ \t]*(?:(?:关键|固定)?搭配|Collocation)[ \t]*[：:][ \t]*/gi,
+    '$1Collocations:\n',
+  );
+  // Guarantee exactly one blank line between the translation and the heading, whether or not
+  // the model (or the normalization above) already left one — keeps the two sections visually
+  // distinct in the panel regardless of the model's own formatting habits.
+  result = result.replace(/[ \t]*\n[ \t\n]*(Collocations:)/i, '\n\n$1');
+  // Drop any collocation bullet whose headword is a single word (e.g. "contain") — a genuine
+  // collocation always spans 2+ words, and smaller models occasionally list a plain word anyway
+  // despite explicit prompt guidance against it.
+  result = result.replace(/^[ \t]*[-*][ \t]*([^\n：:]+)[ \t]*[：:][^\n]*\n?/gm, (line, term: string) =>
+    /\s/.test(term.trim()) ? line : '',
+  );
+  result = result.replace(
+    /(?:\n\s*)?(?:Collocations:\s*\n?)?(?:[-*]\s*)?(?:无明显(?:的)?(?:固定)?搭配|没有明显(?:的)?(?:固定)?搭配|未发现明显(?:的)?(?:固定)?搭配|No (?:obvious|notable|useful) collocations?)[。.]?\s*$/i,
+    '',
+  );
+  result = result.replace(/\n*\s*Collocations:\s*$/i, '');
+  return result.trim();
 }
 
 // CT-015: skip hover translation when the paragraph is already in the target language.
@@ -257,6 +298,9 @@ interface View {
   setChunk(full: string): void;
   done(full: string): void;
   error(msg: string, onRetry: () => void): void;
+  /** Optional: show a "thinking" placeholder while reasoning tokens arrive but no visible
+   *  content has streamed yet (CT-021). Views without a slower reasoning phase may omit it. */
+  thinking?(): void;
 }
 
 class BlockView implements View {
@@ -273,6 +317,10 @@ class BlockView implements View {
   private static readonly SPINNER = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'; // 10-frame braille spinner — zero CSS, ASCII-free
   private waitTimer: number | null = null;
   private waitFrame = 0;
+  // CT-021: the wait placeholder reads "Thinking…" while a reasoning model is emitting hidden
+  // chain-of-thought tokens, then flips to "Translating…" once its visible content starts (which
+  // setChunk observes by clearing this flag) — otherwise a slow reasoning model looks frozen.
+  private waitLabel = 'Translating';
   constructor(originals: Map<number, Element>) {
     this.originals = originals;
     this.host = document.createElement('context-translator-block');
@@ -321,13 +369,15 @@ class BlockView implements View {
     this.errorEl.hidden = true;
     this.stopWaiting();
     this.waitFrame = 0;
-    this.textEl.textContent = 'Translating ' + BlockView.SPINNER[0];
+    this.waitLabel = 'Translating';
+    this.textEl.textContent = this.waitLabel + ' ' + BlockView.SPINNER[0];
     this.waitTimer = window.setInterval(() => {
       this.waitFrame = (this.waitFrame + 1) % BlockView.SPINNER.length; // 10-frame loop
-      this.textEl.textContent = 'Translating ' + BlockView.SPINNER[this.waitFrame];
+      this.textEl.textContent = this.waitLabel + ' ' + BlockView.SPINNER[this.waitFrame];
     }, 80);
     this.hideRetranslate();
   }
+  thinking(): void { this.waitLabel = 'Thinking'; }
   setChunk(full: string) { this.stopWaiting(); this.textEl.textContent = stripTags(full); }
   done(full: string) {
     this.stopWaiting();
@@ -356,6 +406,10 @@ class PanelView implements View {
   private errorEl: HTMLElement;
   private retryBtn: HTMLElement;
   private head: HTMLElement;
+  /** Live viewport rectangle for the selection this panel belongs to. A cloned Range keeps
+   *  returning updated client coordinates while the page (or a nested scroller) moves. */
+  private anchorRect: (() => DOMRect | null) | null = null;
+  private hasContent = false;
   constructor() {
     this.host = document.createElement('context-translator-panel');
     this.host.style.cssText = 'all:initial;display:block;position:fixed;z-index:2147483647;box-sizing:border-box';
@@ -372,21 +426,54 @@ class PanelView implements View {
     this.head = root.querySelector<HTMLElement>('.ct-panel-head')!;
     root.querySelector<HTMLElement>('.ct-close')!.addEventListener('click', () => this.hide());
     this.makeDraggable();
+    // scroll does not bubble, so capture it to also follow selections inside nested scrollers.
+    document.addEventListener('scroll', () => this.repositionFromAnchor(false), { passive: true, capture: true });
+    window.addEventListener('resize', () => this.repositionFromAnchor(true), { passive: true });
   }
   show(x: number, y: number): void {
+    this.anchorRect = null;
+    this.positionAt(x, y, true);
+    this.host.style.display = 'block';
+  }
+  showAnchored(anchorRect: () => DOMRect | null, fallbackX: number, fallbackY: number): void {
+    this.anchorRect = anchorRect;
+    this.host.style.display = 'block';
+    const rect = anchorRect();
+    if (rect) this.positionAt(rect.left, rect.bottom + 10, true);
+    else this.positionAt(fallbackX, fallbackY, true);
+  }
+  private positionAt(x: number, y: number, clampVertically: boolean): void {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const w = Math.min(420, vw * 0.86);
     const left = Math.max(8, Math.min(x, vw - w - 8));
-    const top = Math.max(8, Math.min(y, vh - 140));
+    // Initial placement is kept visible. During scrolling the unclamped Y coordinate is used,
+    // allowing the panel to enter and leave the viewport together with its source selection.
+    const top = clampVertically ? Math.max(8, Math.min(y, vh - 140)) : y;
     this.host.style.left = `${left}px`;
     this.host.style.top = `${top}px`;
+  }
+  private repositionFromAnchor(clampVertically: boolean): void {
+    if (!this.anchorRect || this.host.style.display === 'none') return;
+    const rect = this.anchorRect();
+    if (rect) this.positionAt(rect.left, rect.bottom + 10, clampVertically);
+  }
+  hide(): void {
+    this.anchorRect = null;
+    this.host.style.display = 'none';
+  }
+  start() {
+    this.textEl.textContent = '';
+    this.hasContent = false;
+    this.textEl.classList.add('ct-streaming');
+    this.errorEl.hidden = true;
     this.host.style.display = 'block';
   }
-  hide(): void { this.host.style.display = 'none'; }
-  start() { this.textEl.textContent = ''; this.textEl.classList.add('ct-streaming'); this.errorEl.hidden = true; this.host.style.display = 'block'; }
-  setChunk(full: string) { this.textEl.textContent = full; }
-  done(full: string) { this.textEl.textContent = full; this.textEl.classList.remove('ct-streaming'); }
+  /** CT-021: shown only while nothing visible has streamed yet — a real chunk (setChunk) always
+   *  wins, so a reasoning model's "thinking" placeholder never clobbers actual output. */
+  thinking(): void { if (!this.hasContent) this.textEl.textContent = 'Thinking...'; }
+  setChunk(full: string) { this.hasContent = true; this.textEl.textContent = full; }
+  done(full: string) { this.hasContent = true; this.textEl.textContent = full; this.textEl.classList.remove('ct-streaming'); }
   error(msg: string, onRetry: () => void) {
     this.textEl.classList.remove('ct-streaming');
     this.errMsg.textContent = msg;
@@ -408,12 +495,80 @@ class PanelView implements View {
       document.removeEventListener('mouseup', onUp);
     };
     this.head.addEventListener('mousedown', (e: MouseEvent) => {
+      // Dragging is an explicit request for a manual position, so stop following the selection.
+      this.anchorRect = null;
       dragging = true;
       offX = e.clientX - parseFloat(this.host.style.left || '0');
       offY = e.clientY - parseFloat(this.host.style.top || '0');
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     });
+  }
+}
+
+/** Small Edge-style action shown beside a completed text selection. */
+class SelectionTriggerView {
+  readonly host: HTMLElement;
+  private readonly button: HTMLButtonElement;
+  private selectedText = '';
+  private hideTimer: number | null = null;
+
+  constructor(onTranslate: (text: string) => void) {
+    this.host = document.createElement('context-translator-selection-trigger');
+    this.host.style.cssText =
+      'all:initial;display:none;position:fixed;z-index:2147483647;box-sizing:border-box';
+    const root = shadowOf(this.host);
+    root.innerHTML =
+      '<button class="ct-selection-trigger" type="button" title="结合上下文翻译所选文本" aria-label="结合上下文翻译所选文本">' +
+      '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+      '<path d="M4.4 5.6h10.1a2.7 2.7 0 0 1 2.7 2.7v4.5a2.7 2.7 0 0 1-2.7 2.7H9l-3.8 3v-3h-.8a2.7 2.7 0 0 1-2.7-2.7V8.3a2.7 2.7 0 0 1 2.7-2.7Z" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<path d="M7 9h5.1M7 12h3.4" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" opacity=".9"/>' +
+      '<path d="M18.4 2.8c.25 1.55 1.05 2.35 2.6 2.6-1.55.25-2.35 1.05-2.6 2.6-.25-1.55-1.05-2.35-2.6-2.6 1.55-.25 2.35-1.05 2.6-2.6Z" fill="#ffe27a" stroke="#fff" stroke-width=".35" stroke-linejoin="round"/>' +
+      '<circle cx="20.8" cy="10.2" r="1" fill="#ffe27a"/>' +
+      '</svg></button>';
+    this.button = root.querySelector<HTMLButtonElement>('button')!;
+
+    // Keep the browser selection intact while the button receives the click.
+    this.button.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    this.button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const text = this.selectedText;
+      this.hide();
+      if (text) onTranslate(text);
+    });
+    this.button.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') this.hide();
+    });
+  }
+
+  show(text: string, rect: DOMRect | null, fallbackX: number, fallbackY: number): void {
+    if (this.hideTimer !== null) window.clearTimeout(this.hideTimer);
+    this.selectedText = text;
+    const size = 30;
+    const gap = 4;
+    // Prefer immediately above the selection's first line, aligned to its left edge. This keeps
+    // clear of translation tools that conventionally attach to the selection's right/bottom.
+    const preferredLeft = rect ? rect.left : fallbackX - size - gap;
+    const preferredTop = rect ? rect.top - size - gap : fallbackY - size - gap;
+    const left = Math.max(6, Math.min(preferredLeft, window.innerWidth - size - 6));
+    const top = Math.max(6, Math.min(preferredTop, window.innerHeight - size - 6));
+    this.host.style.left = `${left}px`;
+    this.host.style.top = `${top}px`;
+    this.host.style.display = 'block';
+    this.hideTimer = window.setTimeout(() => this.hide(), 5000);
+  }
+
+  hide(): void {
+    if (this.hideTimer !== null) {
+      window.clearTimeout(this.hideTimer);
+      this.hideTimer = null;
+    }
+    this.selectedText = '';
+    this.host.style.display = 'none';
   }
 }
 
@@ -524,13 +679,40 @@ function findParagraph(el: Element | null): ParaHit | null {
   return null;
 }
 
-function selectionRect(): DOMRect | null {
+function selectionStartRect(): DOMRect | null {
   const sel = window.getSelection();
   if (sel && sel.rangeCount > 0) {
-    const r = sel.getRangeAt(0).getBoundingClientRect();
-    if (r.width || r.height) return r;
+    return rangeEdgeRect(sel.getRangeAt(0), 'start');
   }
   return null;
+}
+
+/** Return one rendered edge of a range. The end edge is used for the result panel; the start
+ *  edge is used for the small selection action so multi-line selections stay predictable. */
+function rangeEdgeRect(range: Range, edge: 'start' | 'end'): DOMRect | null {
+  const rects = Array.from(range.getClientRects()).filter((rect) => rect.width || rect.height);
+  if (rects.length > 0) return rects[edge === 'start' ? 0 : rects.length - 1];
+  const fallback = range.getBoundingClientRect();
+  return fallback.width || fallback.height ? fallback : null;
+}
+
+/** Capture a live anchor before clicking the selection action changes focus. Cloned DOM ranges
+ *  remain attached to their text nodes and therefore report fresh viewport coordinates on scroll.
+ *  Form controls have no DOM Range, so anchor to the control itself. The final fallback stores a
+ *  document point, which still follows ordinary window scrolling. */
+function captureSelectionAnchor(fallbackX: number, fallbackY: number): () => DOMRect | null {
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0 && sel.toString().trim()) {
+    const range = sel.getRangeAt(0).cloneRange();
+    return () => rangeEdgeRect(range, 'end');
+  }
+  const active = document.activeElement;
+  if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+    return () => active.isConnected ? active.getBoundingClientRect() : null;
+  }
+  const pageX = fallbackX + window.scrollX;
+  const pageY = fallbackY + window.scrollY;
+  return () => new DOMRect(pageX - window.scrollX, pageY - window.scrollY, 0, 0);
 }
 
 // CT-017: the active text selection for the trigger-key path. window.getSelection() misses
@@ -552,10 +734,12 @@ function currentSelectionText(): string {
 // ---------- main ----------
 async function main(): Promise<void> {
   const settings: Settings = await loadSettings();
-  const session = new Session(settings.targetLang, settings.customPrompt);
+  const session = new Session(settings.targetLang, settings.customPrompt, settings.selectionPrompt);
   const triggerKey = settings.triggerKey || 'Alt';
   const panel = new PanelView();
   (document.body || document.documentElement).appendChild(panel.host);
+  const selectionTrigger = new SelectionTriggerView((text) => selectionTranslate(text));
+  (document.body || document.documentElement).appendChild(selectionTrigger.host);
   const instr = new InstructionView();
   (document.body || document.documentElement).appendChild(instr.host);
 
@@ -590,9 +774,33 @@ async function main(): Promise<void> {
     selTimer = window.setTimeout(() => {
       selTimer = null;
       const has = !!currentSelectionText();
+      const selectionNode = window.getSelection()?.anchorNode;
+      const isSelectingPanel = !!selectionNode && !!panel.host.shadowRoot?.contains(selectionNode);
+      // Starting a new page selection dismisses the previous result. Preserve the panel while
+      // the user selects/copies text inside the result itself.
+      if (!isSelectingPanel) panel.hide();
+      if (!has) selectionTrigger.hide();
       if (has !== selHas) { selHas = has; chrome.runtime.sendMessage({ kind: 'selectionState', has }).catch(() => {}); }
     }, 50);
   });
+
+  // Reveal the action only after selection completes; form-control selections use the last
+  // pointer coordinates because input/textarea selections do not expose a DOM Range rectangle.
+  let selectionTriggerTimer: number | null = null;
+  const scheduleSelectionTrigger = (): void => {
+    if (selectionTriggerTimer !== null) clearTimeout(selectionTriggerTimer);
+    selectionTriggerTimer = window.setTimeout(() => {
+      selectionTriggerTimer = null;
+      const text = currentSelectionText();
+      if (!text) { selectionTrigger.hide(); return; }
+      selectionTrigger.show(text, selectionStartRect(), mx < 0 ? 8 : mx, my < 0 ? 8 : my);
+    }, 0);
+  };
+  document.addEventListener('mouseup', scheduleSelectionTrigger, { passive: true });
+  document.addEventListener('keyup', (event) => {
+    if (event.key !== triggerKey) scheduleSelectionTrigger();
+  }, { passive: true });
+  document.addEventListener('scroll', () => selectionTrigger.hide(), { passive: true, capture: true });
 
   // tap-trigger semantics: trigger only on a solo tap of the trigger key (no other key/mouse/modifier)
   const TK = triggerKey.toLowerCase();
@@ -688,6 +896,7 @@ async function main(): Promise<void> {
     st.view.start();
     runFlight('translate', () => session.buildTranslateRequest(skeleton), {
       onChunk: (full) => st.view.setChunk(full),
+      onReasoning: () => st.view.thinking?.(),
       onDone: (full, usage) => {
         st.translation = full;
         st.view.done(full);
@@ -716,6 +925,7 @@ async function main(): Promise<void> {
     st.view.start();
     runFlight('translate', () => session.buildTranslateRequest(st.skeleton, 're-translate'), {
       onChunk: (full) => st.view.setChunk(full),
+      onReasoning: () => st.view.thinking?.(),
       onDone: (full, usage) => {
         st.translation = full;
         st.view.done(full);
@@ -731,12 +941,20 @@ async function main(): Promise<void> {
   }
 
   function selectionTranslate(text: string): void {
-    const rect = selectionRect();
+    selectionTrigger.hide();
+    const fallbackX = mx < 0 ? 8 : mx;
+    const fallbackY = my < 0 ? 8 : my;
+    const anchor = captureSelectionAnchor(fallbackX, fallbackY);
     panel.start();
-    panel.show(rect ? rect.left : mx, rect ? rect.bottom + 10 : my);
-    runFlight('translate', () => session.buildTranslateRequest(text), {
-      onChunk: (full) => panel.setChunk(full),
-      onDone: (full, usage) => { panel.done(full); session.commitResponse(full, usage); },
+    panel.showAnchored(anchor, fallbackX, fallbackY);
+    runFlight('translate', () => session.buildSelectionRequest(text), {
+      onChunk: (full) => panel.setChunk(normalizeSelectionResult(full)),
+      onReasoning: () => panel.thinking(),
+      onDone: (full, usage) => {
+        const normalized = normalizeSelectionResult(full);
+        panel.done(normalized);
+        session.commitResponse(normalized, usage);
+      },
       onError: (msg) => panel.error(msg, () => selectionTranslate(text)),
     });
   }
@@ -746,6 +964,7 @@ async function main(): Promise<void> {
     panel.show(mx < 0 ? window.innerWidth / 2 : mx, my < 0 ? 80 : my);
     runFlight('compress', () => session.buildCompressRequest(), {
       onChunk: (full) => panel.setChunk(full),
+      onReasoning: () => panel.thinking(),
       onDone: (full, usage) => { session.commitCompress(full, usage); panel.done(full); sendResponse({ kind: 'ok' }); },
       onError: (msg) => { panel.error(msg, () => doCompress(sendResponse)); sendResponse({ kind: 'error', message: msg }); },
     });

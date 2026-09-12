@@ -3,7 +3,9 @@
 // See design/session.md (SES-001 .. SES-005).
 
 import type { ChatMessage, Usage, UsageSnapshot } from '../shared/messages';
-import { COMPRESS_PROMPT, DEFAULT_SYSTEM_PROMPT, langLabel } from '../config';
+import { COMPRESS_PROMPT, DEFAULT_SELECTION_PROMPT, DEFAULT_SYSTEM_PROMPT, SELECTION_ANALYSIS_PROMPT, langLabel } from '../config';
+
+type OutputMode = 'translation' | 'selection-analysis';
 
 /** A buffered context item not yet sent to the LLM. */
 export interface PendingItem {
@@ -31,6 +33,7 @@ export class Session {
   constructor(
     private readonly targetLang: string,
     private readonly customPrompt: string,
+    private readonly selectionPrompt: string = DEFAULT_SELECTION_PROMPT,
   ) {}
 
   /** Reset to a fresh session (clear action / new page). */
@@ -59,10 +62,28 @@ export class Session {
    *  re-translate, CT-016/SES-006) leads the <user-instruction> block as a re-translate signal; the
    *  custom prompt is NOT re-folded for a re-translate (already in the segment's first user message). */
   buildTranslateRequest(text: string, marker?: string): ChatMessage[] {
+    return this.buildRequest(text, 'translation', marker);
+  }
+
+  /** Build an explicit selection request with translation, explanation, and collocations. */
+  buildSelectionRequest(text: string): ChatMessage[] {
+    // Repeat the general prompt on every explicit selection: terminology preservation must not
+    // fade into distant conversation history after the first translation on a long-lived page.
+    const folded = this.foldPending(text, false);
+    const outputInstruction = this.selectionPrompt.trim() || DEFAULT_SELECTION_PROMPT;
+    const terminologyInstruction = this.customPrompt.trim()
+      ? `<user-instruction>\n${this.customPrompt.trim()}\n</user-instruction>\n`
+      : '';
+    const userContent = `<selection-output-instruction>\n${outputInstruction}\n</selection-output-instruction>\n${terminologyInstruction}${folded}`;
+    this.pendingUserContent = userContent;
+    return [this.systemMessage('selection-analysis'), ...this.turns, { role: 'user', content: userContent }];
+  }
+
+  private buildRequest(text: string, mode: OutputMode, marker?: string): ChatMessage[] {
     const includeCustom = !this.turns.some((t) => t.role === 'user');
     const userContent = this.foldPending(text, includeCustom, marker);
     this.pendingUserContent = userContent;
-    return [this.systemMessage(), ...this.turns, { role: 'user', content: userContent }];
+    return [this.systemMessage(mode), ...this.turns, { role: 'user', content: userContent }];
   }
 
   /**
@@ -106,8 +127,9 @@ export class Session {
     };
   }
 
-  private systemMessage(): ChatMessage {
-    return { role: 'system', content: `${DEFAULT_SYSTEM_PROMPT}\n\nTarget language: ${langLabel(this.targetLang)}.` };
+  private systemMessage(mode: OutputMode = 'translation'): ChatMessage {
+    const prompt = mode === 'selection-analysis' ? SELECTION_ANALYSIS_PROMPT : DEFAULT_SYSTEM_PROMPT;
+    return { role: 'system', content: `${prompt}\n\nTarget language: ${langLabel(this.targetLang)}.` };
   }
 
   /** Fold pending context into the translation user message with the XML tags (SES-002).

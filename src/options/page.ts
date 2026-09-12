@@ -1,4 +1,4 @@
-// Options page (POP-006): base URL / API key / model / trigger key / custom prompt / thinking + effort.
+// Options page (POP-006): endpoint/model, thinking, general prompt, and selection-output prompt.
 // Reads/writes chrome.storage.local via the config module (shared schema with the popup).
 // Saves a partial patch so the popup-owned targetLang is left untouched.
 import { loadSettings, saveSettings, type Settings } from '../config';
@@ -25,6 +25,7 @@ async function populate(): Promise<void> {
   effortRadios.value = ['low', 'medium', 'high', 'max'].includes(s.effort) ? s.effort : 'low';
   syncEffortDisabled();
   (field('customPrompt') as HTMLTextAreaElement).value = s.customPrompt;
+  (field('selectionPrompt') as HTMLTextAreaElement).value = s.selectionPrompt;
   (field('maxContextK') as HTMLInputElement).value = String(s.maxContextK);
 }
 
@@ -62,7 +63,7 @@ form?.addEventListener('submit', async (e) => {
   const fd = new FormData(form);
   const effortVal = String(fd.get('effort') ?? 'low');
   const maxCtxRaw = Number(fd.get('maxContextK'));
-  const patch: Pick<Settings, 'baseUrl' | 'apiKey' | 'model' | 'thinking' | 'effort' | 'triggerKey' | 'customPrompt' | 'maxContextK'> = {
+  const patch: Pick<Settings, 'baseUrl' | 'apiKey' | 'model' | 'thinking' | 'effort' | 'triggerKey' | 'customPrompt' | 'selectionPrompt' | 'maxContextK'> = {
     baseUrl: String(fd.get('baseUrl') ?? '').trim(),
     apiKey: String(fd.get('apiKey') ?? ''),
     model: String(fd.get('model') ?? '').trim(),
@@ -70,6 +71,7 @@ form?.addEventListener('submit', async (e) => {
     effort: ['low', 'medium', 'high', 'max'].includes(effortVal) ? effortVal : 'low',
     triggerKey: String(fd.get('triggerKey') ?? 'Alt') || 'Alt',
     customPrompt: String(fd.get('customPrompt') ?? '').trim(),
+    selectionPrompt: String(fd.get('selectionPrompt') ?? '').trim(),
     maxContextK: Number.isFinite(maxCtxRaw) && maxCtxRaw > 0 ? Math.floor(maxCtxRaw) : 1000,
   };
   await saveSettings(patch);

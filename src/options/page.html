@@ -59,7 +59,7 @@
     <header><h1>Context Translator 设置</h1></header>
     <form id="settings">
       <label>Base URL<input name="baseUrl" type="url" placeholder="https://api.deepseek.com" /></label>
-      <label>API Key<input name="apiKey" type="password" placeholder="sk-..." /></label>
+      <label>API Key（Ollama 等本地服务可留空）<input name="apiKey" type="password" placeholder="远程 API 填写 sk-...；本地服务留空" /></label>
       <label>Model<input name="model" placeholder="deepseek-v4-flash" /></label>
       <label>最大上下文（K）<input name="maxContextK" type="number" min="1" step="1" inputmode="numeric" placeholder="1000" /><span class="hint">对应模型的上下文窗口，单位 K；默认 1000 = 1M（deepseek-v4-flash）。弹窗上下文用量仪表的分母。</span></label>
       <fieldset class="trigger">
@@ -73,6 +73,7 @@
       <fieldset class="thinking">
         <legend>思考模式</legend>
         <label class="switch"><input type="checkbox" name="thinking" /><span class="track"></span></label>
+        <span class="hint">需要模型原生支持；Ollama 可使用 Qwen 3、DeepSeek R1 等，Qwen 2.5 不支持。</span>
       </fieldset>
       <fieldset class="effort" disabled>
         <legend>思考强度</legend>
@@ -83,14 +84,15 @@
           <label class="seg"><input type="radio" name="effort" value="max" /><span>MAX</span></label>
         </div>
       </fieldset>
-      <label>Custom Prompt<textarea name="customPrompt" rows="6" placeholder="可选。补充领域 / 术语 / 语气等指引；作为用户指引折入首条翻译，位于系统提示词之后、不可覆盖翻译规则。保存后需刷新已打开页面生效。"></textarea></label>
+      <label>通用翻译提示词<textarea name="customPrompt" rows="4" placeholder="可选。补充领域、术语和语气等要求；通常不需要逐个填写英文术语。"></textarea><span class="hint">扩展会自动保留英文技术专有名词、产品/项目/软件/API 名称、缩写和代码标识符；这里可补充少数例外规则。保存后请刷新已打开页面。</span></label>
+      <label>划词结果提示词（与 Thinking 无关）<textarea name="selectionPrompt" rows="9" placeholder="控制划词浮窗的输出内容和格式，例如译文、原始英文搭配及中文解释。"></textarea><span class="hint">每次划词都会应用。留空时直接显示译文；确有搭配时追加“Collocations:”，否则不显示搭配说明。保存后刷新已打开页面生效。</span></label>
       <div class="actions"><button type="submit">保存</button><span id="status"></span></div>
       <p class="hint">目标语言在工具栏弹窗里切换。改动对整个浏览器生效：端点 / key / 模型 / 最大上下文 / 思考模式 / 思考强度即时生效；触发键与自定义提示词对新加载的页面生效（已打开页面需刷新）。</p>
     </form>
     <div id="toast" class="toast" hidden>
       <div class="toast-body">
         <div class="toast-title">思考模式已开启</div>
-        <div class="toast-text">模型会先内部推理再翻译，因此等待首字期间会较长时间停留在「Translating…」——这是它在思考，属正常现象，并非卡住。思考会额外消耗 token（按输出计费）并让译文更慢到来。若偏好快速响应，推荐保持关闭。</div>
+        <div class="toast-text">模型会先内部推理再翻译，因此等待首字会更久。此功能需要模型原生支持；Ollama 请使用 Qwen 3、DeepSeek R1 等，Qwen 2.5 不支持。思考会额外消耗 token，若偏好快速响应，推荐保持关闭。</div>
       </div>
       <button type="button" class="close" aria-label="关闭">✕</button>
     </div>

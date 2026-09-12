@@ -51,7 +51,11 @@ export type RuntimeResponse =
   | { kind: 'error'; message: string };
 
 // Streaming events pushed over a Port (background -> content), one per token chunk.
+// 'reasoning' is a presence signal only (no text payload): reasoning-model chain-of-thought
+// tokens are never shown to the user, but their arrival drives a "Thinking…" placeholder while
+// the model has not yet started streaming its visible `content` (CT-021).
 export type StreamEvent =
   | { kind: 'chunk'; requestId: string; delta: string }
+  | { kind: 'reasoning'; requestId: string }
   | { kind: 'done'; requestId: string; fullText: string; usage: Usage }
   | { kind: 'error'; requestId: string; message: string };

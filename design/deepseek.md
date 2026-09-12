@@ -15,7 +15,7 @@ DeepSeek 作为参考后端的特调知识与兼容性注意。插件对所有 L
 特调分两类，边界如下：
 
 - **通用最佳实践**（对任何 OpenAI 兼容后端都成立，DeepSeek 之外也受益）：system 消息前置且页面内稳定、committed 轮次顺序追加、变化内容置于请求末尾、不自动截断历史、多轮不回传 reasoning_content、流式跳过 SSE keep-alive 注释行。
-- **DeepSeek 专属**（仅 DeepSeek 端点生效）：`usage.prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` 缓存字段、`thinking` 顶层字段、`reasoning_effort`、prefix completion 的 `/beta` 端点。读侧对缺失字段容错——`normalizeUsage` 仅在字段存在时捕获。写侧（请求体）始终带 `thinking`（enabled/disabled），这是 DeepSeek 特调：其他 OpenAI 兼容后端通常忽略未知字段，但严格后端可能对 `thinking` / `reasoning_effort` 返回 422；这是"针对 DeepSeek 特调"的取舍。
+- **DeepSeek 专属**（仅 DeepSeek 端点生效）：`usage.prompt_cache_hit_tokens` / `prompt_cache_miss_tokens` 缓存字段、`thinking` 顶层字段、`reasoning_effort`、prefix completion 的 `/beta` 端点。读侧对缺失字段容错——`normalizeUsage` 仅在字段存在时捕获。写侧仅对 DeepSeek 端点发送 `thinking`（enabled/disabled）；Ollama 与其他兼容端点不再收到该 DeepSeek 专用字段。
 
 ## Reference
 
