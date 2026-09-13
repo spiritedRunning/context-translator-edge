@@ -65,13 +65,29 @@
         <div class="bar"><div id="ctxFill" class="bar-fill"></div></div>
         <span id="ctxText" class="pi-val">—</span>
       </div>
-      <div class="pi-row">
-        <span class="pi-label">Last Cache Hit Rate</span>
-        <span id="lastRate" class="pi-val">—</span>
+      <div id="cacheStats">
+        <div class="pi-row">
+          <span class="pi-label">Last Cache Hit Rate</span>
+          <span id="lastRate" class="pi-val">—</span>
+        </div>
+        <div class="pi-row">
+          <span class="pi-label">Total Cache Hit Rate</span>
+          <span id="totalRate" class="pi-val">—</span>
+        </div>
       </div>
-      <div class="pi-row">
-        <span class="pi-label">Total Cache Hit Rate</span>
-        <span id="totalRate" class="pi-val">—</span>
+      <div id="ollamaStats" hidden>
+        <div class="pi-row">
+          <span class="pi-label" title="最近一次翻译请求的输入 token 数">Input Tokens</span>
+          <span id="inputTokens" class="pi-val">—</span>
+        </div>
+        <div class="pi-row">
+          <span class="pi-label" title="从首个可见输出到完成的平均生成速度">Generation Speed</span>
+          <span id="generationSpeed" class="pi-val">—</span>
+        </div>
+        <div class="pi-row">
+          <span class="pi-label" title="从发出请求到出现首个可见输出的耗时">First Token Latency</span>
+          <span id="firstTokenLatency" class="pi-val">—</span>
+        </div>
       </div>
     </section>
     <script type="module" src="./main.ts"></script>

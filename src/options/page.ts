@@ -1,7 +1,7 @@
 // Options page (POP-006): endpoint/model, thinking, general prompt, and selection-output prompt.
 // Reads/writes chrome.storage.local via the config module (shared schema with the popup).
 // Saves a partial patch so the popup-owned targetLang is left untouched.
-import { loadSettings, saveSettings, type Settings } from '../config';
+import { DEFAULTS, loadSettings, saveSettings, type Settings } from '../config';
 
 const form = document.getElementById('settings') as HTMLFormElement | null;
 const status = document.getElementById('status');
@@ -72,7 +72,7 @@ form?.addEventListener('submit', async (e) => {
     triggerKey: String(fd.get('triggerKey') ?? 'Alt') || 'Alt',
     customPrompt: String(fd.get('customPrompt') ?? '').trim(),
     selectionPrompt: String(fd.get('selectionPrompt') ?? '').trim(),
-    maxContextK: Number.isFinite(maxCtxRaw) && maxCtxRaw > 0 ? Math.floor(maxCtxRaw) : 1000,
+    maxContextK: Number.isFinite(maxCtxRaw) && maxCtxRaw > 0 ? Math.floor(maxCtxRaw) : DEFAULTS.maxContextK,
   };
   await saveSettings(patch);
   if (status) {

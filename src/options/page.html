@@ -58,10 +58,10 @@
   <body>
     <header><h1>Context Translator 设置</h1></header>
     <form id="settings">
-      <label>Base URL<input name="baseUrl" type="url" placeholder="https://api.deepseek.com" /></label>
+      <label>Base URL<input name="baseUrl" type="url" placeholder="http://localhost:11434" /></label>
       <label>API Key（Ollama 等本地服务可留空）<input name="apiKey" type="password" placeholder="远程 API 填写 sk-...；本地服务留空" /></label>
-      <label>Model<input name="model" placeholder="deepseek-v4-flash" /></label>
-      <label>最大上下文（K）<input name="maxContextK" type="number" min="1" step="1" inputmode="numeric" placeholder="1000" /><span class="hint">对应模型的上下文窗口，单位 K；默认 1000 = 1M（deepseek-v4-flash）。弹窗上下文用量仪表的分母。</span></label>
+      <label>Model<input name="model" placeholder="qwen2.5:14b" /></label>
+      <label>最大上下文（K）<input name="maxContextK" type="number" min="1" step="1" inputmode="numeric" placeholder="32" /><span class="hint">对应模型的上下文窗口，单位 K；默认 32（Ollama qwen2.5:14b）。弹窗上下文用量仪表的分母。</span></label>
       <fieldset class="trigger">
         <legend>触发键</legend>
         <div class="segmented">

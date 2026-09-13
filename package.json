@@ -1,12 +1,17 @@
 {
   "name": "context-translator",
-  "version": "0.1.6",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "AI-powered hover/selection translation browser extension for Microsoft Edge, with a per-page context session.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:edge": "vite build --mode edge",
+    "build:chrome": "vite build --mode chrome",
+    "build:firefox": "vite build --mode firefox",
+    "build:all": "npm run typecheck && npm run build:edge && npm run build:chrome && npm run build:firefox",
+    "package:release": "node scripts/package-release.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

@@ -32,6 +32,10 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.runtime.onMessage.addListener((req: RuntimeRequest, _sender, sendResponse) => {
   if (req.kind === 'selectionState') {
     void chrome.contextMenus.update('ctx', { title: req.has ? 'Add to context' : 'Add instruction' });
+  } else if (req.kind === 'openOptions') {
+    // Content scripts do not expose every runtime API consistently across browsers. Open the
+    // settings page from the extension background context for Edge, Chrome, and Firefox.
+    void chrome.runtime.openOptionsPage();
   }
   sendResponse(true);
   return false;
@@ -62,11 +66,11 @@ chrome.runtime.onConnect.addListener((port) => {
 async function streamCompletion(port: chrome.runtime.Port, msg: StreamRequestMessage): Promise<void> {
   const settings = await loadSettings();
   if (!settings.baseUrl || !settings.model) {
-    postEvent(port, { kind: 'error', requestId: msg.requestId, message: 'API 未配置：请在扩展设置中填写 Base URL 和 Model。' });
+    postEvent(port, { kind: 'error', requestId: msg.requestId, code: 'not_configured', message: 'API 未配置：请在扩展设置中填写 Base URL 和 Model。' });
     return;
   }
   if (!settings.apiKey && !isLocalEndpoint(settings.baseUrl)) {
-    postEvent(port, { kind: 'error', requestId: msg.requestId, message: 'API 未配置：远程服务需要填写 API Key；Ollama 等本地服务可留空。' });
+    postEvent(port, { kind: 'error', requestId: msg.requestId, code: 'not_configured', message: 'API 未配置：远程服务需要填写 API Key；Ollama 等本地服务可留空。' });
     return;
   }
 

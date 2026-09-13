@@ -2,7 +2,7 @@
 // See design/content.md (CT-001 .. CT-018).
 import { loadSettings, type Settings } from '../config';
 import { Session } from '../session';
-import type { ChatMessage, RuntimeRequest, StreamEvent, Usage } from '../shared/messages';
+import type { ChatMessage, RuntimeRequest, StreamErrorCode, StreamEvent, Usage } from '../shared/messages';
 import DOMPurify from 'dompurify';
 
 const PORT_NAME = 'llm-stream';
@@ -86,7 +86,7 @@ function shadowOf(host: HTMLElement): ShadowRoot {
 interface Handlers {
   onChunk: (full: string) => void;
   onDone: (full: string, usage: Usage) => void;
-  onError: (msg: string) => void;
+  onError: (msg: string, code?: StreamErrorCode) => void;
   /** Fired (possibly repeatedly) while the model is emitting reasoning tokens, before any
    *  visible content chunk has arrived. Optional: most callers just show a placeholder. */
   onReasoning?: () => void;
@@ -97,15 +97,32 @@ function stream(kind: 'translate' | 'compress', messages: ChatMessage[], h: Hand
   const requestId = String(++reqCounter);
   let buffer = '';
   let settled = false;
+  let startedAt = 0;
+  let firstVisibleChunkAt: number | null = null;
   const done = () => { settled = true; try { port.disconnect(); } catch { /* already closed */ } };
   port.onMessage.addListener((evt: StreamEvent) => {
     if (evt.requestId !== requestId || settled) return;
-    if (evt.kind === 'chunk') { buffer += evt.delta; h.onChunk(buffer); }
+    if (evt.kind === 'chunk') {
+      if (firstVisibleChunkAt === null) firstVisibleChunkAt = performance.now();
+      buffer += evt.delta;
+      h.onChunk(buffer);
+    }
     else if (evt.kind === 'reasoning') { h.onReasoning?.(); }
-    else if (evt.kind === 'done') { settled = true; h.onDone(evt.fullText || buffer, evt.usage); try { port.disconnect(); } catch { /* closed */ } }
-    else if (evt.kind === 'error') { settled = true; h.onError(evt.message); try { port.disconnect(); } catch { /* closed */ } }
+    else if (evt.kind === 'done') {
+      settled = true;
+      const completedAt = performance.now();
+      const usage: Usage = { ...evt.usage };
+      if (firstVisibleChunkAt !== null) {
+        usage.firstTokenMs = Math.max(0, firstVisibleChunkAt - startedAt);
+        usage.generationMs = Math.max(0, completedAt - firstVisibleChunkAt);
+      }
+      h.onDone(evt.fullText || buffer, usage);
+      try { port.disconnect(); } catch { /* closed */ }
+    }
+    else if (evt.kind === 'error') { settled = true; h.onError(evt.message, evt.code); try { port.disconnect(); } catch { /* closed */ } }
   });
   port.onDisconnect.addListener(() => { if (!settled) { settled = true; h.onError('与服务端的连接中断'); } });
+  startedAt = performance.now();
   port.postMessage({ kind, requestId, messages });
 }
 
@@ -127,7 +144,7 @@ function runFlight(kind: 'translate' | 'compress', build: () => ChatMessage[], h
         onChunk: h.onChunk,
         onReasoning: h.onReasoning,
         onDone: (full, usage) => { h.onDone(full, usage); resolve(); },
-        onError: (msg) => { h.onError(msg); resolve(); },
+        onError: (msg, code) => { h.onError(msg, code); resolve(); },
       });
     }));
 }
@@ -320,12 +337,17 @@ function sanitizeClone(el: Element): void {
   }
 }
 
+function openOptionsPage(): void {
+  const request: RuntimeRequest = { kind: 'openOptions' };
+  void chrome.runtime.sendMessage(request).catch(() => { /* extension may be reloading */ });
+}
+
 // ---------- views ----------
 interface View {
   start(): void;
   setChunk(full: string): void;
   done(full: string): void;
-  error(msg: string, onRetry: () => void): void;
+  error(msg: string, onRetry: () => void, code?: StreamErrorCode): void;
   /** Optional: show a "thinking" placeholder while reasoning tokens arrive but no visible
    *  content has streamed yet (CT-021). Views without a slower reasoning phase may omit it. */
   thinking?(): void;
@@ -335,6 +357,8 @@ class BlockView implements View {
   readonly host: HTMLElement;
   private textEl: HTMLElement;
   private errorEl: HTMLElement;
+  private errorMsgNode: Text;
+  private errorActionBtn: HTMLButtonElement;
   private retransBtn: HTMLElement;
   private readonly originals: Map<number, Element>;
   // CT-016: re-translate button bound after the view is attached to a paragraph.
@@ -361,6 +385,15 @@ class BlockView implements View {
       '<span class="ct-error" hidden style="color:#9a3b32"></span>';
     this.textEl = this.host.querySelector<HTMLElement>('.ct-text')!;
     this.errorEl = this.host.querySelector<HTMLElement>('.ct-error')!;
+    this.errorMsgNode = document.createTextNode('');
+    this.errorEl.appendChild(this.errorMsgNode);
+    this.errorActionBtn = document.createElement('button');
+    this.errorActionBtn.type = 'button';
+    this.errorActionBtn.textContent = '配置';
+    this.errorActionBtn.style.cssText =
+      'all:unset;display:none;cursor:pointer;margin-left:.6em;color:#9a6a2f;' +
+      'border-bottom:1px solid currentColor;font:inherit;white-space:nowrap';
+    this.errorEl.appendChild(this.errorActionBtn);
     // CT-016: a small "re-translate" icon button appended after the translation. Light-DOM,
     // all inline styles (no shadow to scope a class rule, same constraint as the spinner).
     // ↻ = U+21BB CLOCKWISE OPEN CIRCLE ARROW. Hidden until a translation completes.
@@ -413,10 +446,13 @@ class BlockView implements View {
     this.textEl.innerHTML = html || stripTags(full); // fallback to plain text if reconstruction yields nothing
     this.showRetranslate();
   }
-  error(msg: string, _onRetry: () => void) {
+  error(msg: string, _onRetry: () => void, code?: StreamErrorCode) {
     this.stopWaiting();
     this.textEl.textContent = '';
-    this.errorEl.textContent = msg;
+    this.errorMsgNode.nodeValue = msg;
+    const configurable = code === 'not_configured';
+    this.errorActionBtn.style.display = configurable ? 'inline' : 'none';
+    this.errorActionBtn.onclick = configurable ? openOptionsPage : null;
     this.errorEl.hidden = false;
     // The re-translate button's visibility is left to the caller: on a first-translation error
     // it stays hidden (nothing to re-do); on a re-translate error the caller re-shows it so the
@@ -502,11 +538,13 @@ class PanelView implements View {
   thinking(): void { if (!this.hasContent) this.textEl.textContent = 'Thinking...'; }
   setChunk(full: string) { this.hasContent = true; this.textEl.textContent = full; }
   done(full: string) { this.hasContent = true; this.textEl.textContent = full; this.textEl.classList.remove('ct-streaming'); }
-  error(msg: string, onRetry: () => void) {
+  error(msg: string, onRetry: () => void, code?: StreamErrorCode) {
     this.textEl.classList.remove('ct-streaming');
     this.errMsg.textContent = msg;
     this.errorEl.hidden = false;
-    this.retryBtn.onclick = onRetry;
+    const configurable = code === 'not_configured';
+    this.retryBtn.textContent = configurable ? '配置' : '重试';
+    this.retryBtn.onclick = configurable ? openOptionsPage : onRetry;
   }
   private makeDraggable(): void {
     let dragging = false;
@@ -967,9 +1005,9 @@ async function main(): Promise<void> {
         st.status = 'shown';
         session.commitResponse(full, usage);
       },
-      onError: (msg) => {
+      onError: (msg, code) => {
         st.status = 'shown';
-        st.view.error(msg, () => fetchHover(el, skeleton, st));
+        st.view.error(msg, () => fetchHover(el, skeleton, st), code);
       },
     });
   }
@@ -996,9 +1034,9 @@ async function main(): Promise<void> {
         st.status = 'shown';
         session.commitResponse(full, usage);
       },
-      onError: (msg) => {
+      onError: (msg, code) => {
         st.status = 'shown';
-        st.view.error(msg, () => reFetchHover(el, st));
+        st.view.error(msg, () => reFetchHover(el, st), code);
         st.view.showRetranslate();
       },
     });
@@ -1020,7 +1058,7 @@ async function main(): Promise<void> {
         panel.done(normalized);
         session.commitResponse(normalized, usage);
       },
-      onError: (msg) => panel.error(msg, () => selectionTranslate(text)),
+      onError: (msg, code) => panel.error(msg, () => selectionTranslate(text), code),
     });
   }
 
@@ -1031,7 +1069,7 @@ async function main(): Promise<void> {
       onChunk: (full) => panel.setChunk(full),
       onReasoning: () => panel.thinking(),
       onDone: (full, usage) => { session.commitCompress(full, usage); panel.done(full); sendResponse({ kind: 'ok' }); },
-      onError: (msg) => { panel.error(msg, () => doCompress(sendResponse)); sendResponse({ kind: 'error', message: msg }); },
+      onError: (msg, code) => { panel.error(msg, () => doCompress(sendResponse), code); sendResponse({ kind: 'error', message: msg }); },
     });
   }
 

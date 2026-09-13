@@ -17,6 +17,10 @@ export interface Usage {
   completionTokens: number;
   promptCacheHitTokens?: number;
   promptCacheMissTokens?: number;
+  /** User-observed delay from request dispatch until the first visible output chunk. */
+  firstTokenMs?: number;
+  /** User-observed time from the first visible output chunk until the response completes. */
+  generationMs?: number;
 }
 
 // Aggregate usage for the popup display (POP-003): cumulative across all committed
@@ -26,6 +30,8 @@ export interface UsageSnapshot {
   cumulative: Usage;
   last: Usage | null;
 }
+
+export type StreamErrorCode = 'not_configured';
 
 // Runtime request messages (chrome.runtime / chrome.tabs messaging).
 // translate / compress: content -> background (carries the assembled messages array,
@@ -42,6 +48,7 @@ export type RuntimeRequest =
   | { kind: 'contextMenu'; action: 'understand'; selection: string }
   | { kind: 'contextMenu'; action: 'addInstruction' }
   | { kind: 'selectionState'; has: boolean }
+  | { kind: 'openOptions' }
   | { kind: 'clear' }
   | { kind: 'getUsage' };
 
@@ -58,4 +65,4 @@ export type StreamEvent =
   | { kind: 'chunk'; requestId: string; delta: string }
   | { kind: 'reasoning'; requestId: string }
   | { kind: 'done'; requestId: string; fullText: string; usage: Usage }
-  | { kind: 'error'; requestId: string; message: string };
+  | { kind: 'error'; requestId: string; message: string; code?: StreamErrorCode };

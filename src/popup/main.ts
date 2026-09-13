@@ -1,7 +1,7 @@
 // Popup quick settings (POP-001): target language + open the settings page.
 // Reads/writes chrome.storage.local via the config module; saves a partial patch so
 // the options-page-owned fields (baseUrl/apiKey/model/triggerKey/customPrompt) stay intact.
-import { loadSettings, saveSettings } from '../config';
+import { DEFAULTS, loadSettings, saveSettings } from '../config';
 import type { RuntimeResponse, Usage, UsageSnapshot } from '../shared/messages';
 
 const form = document.getElementById('settings') as HTMLFormElement | null;
@@ -32,7 +32,7 @@ openBtn?.addEventListener('click', () => chrome.runtime.openOptionsPage());
 // usage (cumulative + last translation) and render the context gauge + cache hit rates.
 async function loadPageInfo(): Promise<void> {
   const s = await loadSettings();
-  const maxContextK = s.maxContextK > 0 ? s.maxContextK : 1000;
+  const maxContextK = s.maxContextK > 0 ? s.maxContextK : DEFAULTS.maxContextK;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   let snap: UsageSnapshot | null = null;
   if (tab?.id != null) {
@@ -47,15 +47,24 @@ async function loadPageInfo(): Promise<void> {
       });
     });
   }
-  renderPageInfo(snap, maxContextK);
+  renderPageInfo(snap, maxContextK, isOllamaEndpoint(s.baseUrl));
 }
 
-function renderPageInfo(snap: UsageSnapshot | null, maxContextK: number): void {
+function renderPageInfo(snap: UsageSnapshot | null, maxContextK: number, ollama: boolean): void {
   const ctxText = document.getElementById('ctxText');
   const ctxFill = document.getElementById('ctxFill');
   const lastRate = document.getElementById('lastRate');
   const totalRate = document.getElementById('totalRate');
-  if (!ctxText || !ctxFill || !lastRate || !totalRate) return;
+  const cacheStats = document.getElementById('cacheStats');
+  const ollamaStats = document.getElementById('ollamaStats');
+  const inputTokens = document.getElementById('inputTokens');
+  const generationSpeed = document.getElementById('generationSpeed');
+  const firstTokenLatency = document.getElementById('firstTokenLatency');
+  if (!ctxText || !ctxFill || !lastRate || !totalRate || !cacheStats || !ollamaStats ||
+      !inputTokens || !generationSpeed || !firstTokenLatency) return;
+
+  cacheStats.hidden = ollama;
+  ollamaStats.hidden = !ollama;
 
   const maxLabel = formatMaxLabel(maxContextK);
   const maxContext = maxContextK * 1000;
@@ -81,6 +90,9 @@ function renderPageInfo(snap: UsageSnapshot | null, maxContextK: number): void {
 
   lastRate.textContent = formatCacheRate(last);
   totalRate.textContent = formatCacheRate(snap?.cumulative ?? null);
+  inputTokens.textContent = last ? last.promptTokens.toLocaleString() : '—';
+  generationSpeed.textContent = formatGenerationSpeed(last);
+  firstTokenLatency.textContent = formatLatency(last?.firstTokenMs);
 }
 
 /** Integer K, rounded; `<1K` when nonzero but under 0.5K; `0K` when zero. */
@@ -108,6 +120,31 @@ function formatCacheRate(u: Usage | null): string {
   const sum = hit + miss;
   if (sum <= 0) return '—';
   return `${((hit / sum) * 100).toFixed(1)}%`;
+}
+
+function formatGenerationSpeed(u: Usage | null): string {
+  if (!u || u.completionTokens <= 0 || u.generationMs == null || u.generationMs <= 0) return '—';
+  const rate = u.completionTokens / (u.generationMs / 1000);
+  return `${rate < 100 ? rate.toFixed(1) : Math.round(rate)} tok/s`;
+}
+
+function formatLatency(ms: number | undefined): string {
+  if (ms == null || !Number.isFinite(ms)) return '—';
+  if (ms < 1) return '<1 ms';
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  return `${(ms / 1000).toFixed(2)} s`;
+}
+
+function isOllamaEndpoint(baseUrl: string): boolean {
+  try {
+    const url = new URL(baseUrl);
+    const host = url.hostname.toLowerCase();
+    const local = host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '0.0.0.0' ||
+      host.startsWith('10.') || host.startsWith('192.168.') || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+    return local && url.port === '11434';
+  } catch {
+    return false;
+  }
 }
 
 void populate();

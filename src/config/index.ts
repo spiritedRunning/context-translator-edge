@@ -9,13 +9,13 @@ const STORAGE_KEY = 'settings';
  * (never chrome.storage.sync), and is read solely by the background service worker.
  */
 export interface Settings {
-  /** OpenAI-compatible chat completions base URL, e.g. "https://api.deepseek.com". */
+  /** OpenAI-compatible chat completions base URL, e.g. local Ollama or DeepSeek. */
   baseUrl: string;
   /** API key — optional for local endpoints; never synced, only read by the background service worker. */
   apiKey: string;
-  /** Model id, e.g. "deepseek-v4-flash" (or "deepseek-v4-pro"). */
+  /** Model id, e.g. "qwen2.5:14b" or "deepseek-v4-flash". */
   model: string;
-  /** Thinking mode toggle (DeepSeek top-level `thinking` field). Default on. */
+  /** Thinking mode toggle. Disabled by default because the default Qwen 2.5 model does not support it. */
   thinking: boolean;
   /** Reasoning effort: "low" | "medium" | "high" | "max". Sent only when thinking is on.
    *  DeepSeek honors high/max (low/medium map to high); the full range is exposed for
@@ -33,9 +33,9 @@ export interface Settings {
   customPrompt: string;
   /** User-editable output instructions for explicit selection translation. Independent of thinking. */
   selectionPrompt: string;
-  /** Max context window in K tokens (CFG-006). Default 1000 (= 1M for deepseek-v4-flash).
+  /** Max context window in K tokens (CFG-006). Default 32 for Ollama qwen2.5:14b.
    *  User-supplied since the API doesn't return it; denominator for the popup context gauge
-   *  (POP-003). A non-positive value falls back to 1000K via withDefaults. */
+   *  (POP-003). A non-positive value falls back to 32K via withDefaults. */
   maxContextK: number;
 }
 
@@ -92,9 +92,9 @@ export const COMPRESS_PROMPT = `You are summarizing a translation session for on
 
 /** Default settings, applied for any field that has never been set. */
 export const DEFAULTS: Settings = {
-  baseUrl: 'https://api.deepseek.com',
+  baseUrl: 'http://localhost:11434',
   apiKey: '',
-  model: 'deepseek-v4-flash',
+  model: 'qwen2.5:14b',
   thinking: false,
   effort: 'low',
   targetLang: 'zh-CN',
@@ -102,7 +102,7 @@ export const DEFAULTS: Settings = {
   triggerKey: 'Alt',
   customPrompt: '',
   selectionPrompt: DEFAULT_SELECTION_PROMPT,
-  maxContextK: 1000,
+  maxContextK: 32,
 };
 
 /** Human-readable labels for common target language codes. */
@@ -123,7 +123,7 @@ export function langLabel(code: string): string {
   return LANG_LABELS[code] ?? code;
 }
 
-/** Fall empty base URL / model back to the DeepSeek defaults, so clearing the field and
+/** Fall empty base URL / model back to the Ollama defaults, so clearing the field and
  *  saving still resolves to the default rather than breaking requests. The API key is
  *  intentionally not defaulted — it must be filled by the user. */
 function withDefaults(s: Settings): Settings {
