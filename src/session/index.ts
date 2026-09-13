@@ -65,8 +65,10 @@ export class Session {
     return this.buildRequest(text, 'translation', marker);
   }
 
-  /** Build an explicit selection request with translation, explanation, and collocations. */
-  buildSelectionRequest(text: string): ChatMessage[] {
+  /** Build an explicit selection request with translation, explanation, and collocations.
+   *  A single English word is tagged explicitly so local models reliably choose the richer
+   *  dictionary output. `surroundingContext` is page text near the selection, not a command. */
+  buildSelectionRequest(text: string, surroundingContext = ''): ChatMessage[] {
     // Repeat the general prompt on every explicit selection: terminology preservation must not
     // fade into distant conversation history after the first translation on a long-lived page.
     const folded = this.foldPending(text, false);
@@ -74,7 +76,15 @@ export class Session {
     const terminologyInstruction = this.customPrompt.trim()
       ? `<user-instruction>\n${this.customPrompt.trim()}\n</user-instruction>\n`
       : '';
-    const userContent = `<selection-output-instruction>\n${outputInstruction}\n</selection-output-instruction>\n${terminologyInstruction}${folded}`;
+    const selectionKind = /^[A-Za-z]+(?:[-'’][A-Za-z]+)*$/.test(text.trim())
+      ? 'single-english-word'
+      : 'phrase-or-sentence';
+    const context = surroundingContext.trim();
+    const contextBlock = context && context !== text.trim()
+      ? `<selection-context>\n${context}\n</selection-context>\n`
+      : '';
+    const userContent = `<selection-output-instruction>\n${outputInstruction}\n</selection-output-instruction>\n` +
+      `<selection-kind>${selectionKind}</selection-kind>\n${contextBlock}${terminologyInstruction}${folded}`;
     this.pendingUserContent = userContent;
     return [this.systemMessage('selection-analysis'), ...this.turns, { role: 'user', content: userContent }];
   }

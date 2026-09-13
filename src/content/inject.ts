@@ -166,7 +166,35 @@ function normalizeSelectionResult(text: string): string {
     '',
   );
   result = result.replace(/\n*\s*Collocations:\s*$/i, '');
+  // Local models sometimes repeat the same part-of-speech prefix for every sense. Keep one
+  // label per line; a genuinely different part of speech starts a new line.
+  result = result.split('\n').map((line) => groupPartOfSpeechSenses(line)).join('\n');
   return result.trim();
+}
+
+function groupPartOfSpeechSenses(line: string): string {
+  if (!/^\s*(?:n|v|adj|adv|prep|conj|pron|interj)\.\s+/i.test(line)) return line;
+  const grouped: Array<{ pos: string; senses: string[] }> = [];
+  let current: { pos: string; senses: string[] } | undefined;
+  for (const rawPart of line.split(/[；;]/)) {
+    const part = rawPart.trim();
+    if (!part) continue;
+    const match = part.match(/^(n|v|adj|adv|prep|conj|pron|interj)\.\s*(.*)$/i);
+    if (match) {
+      const pos = match[1].toLowerCase();
+      current = grouped.find((entry) => entry.pos === pos);
+      if (!current) {
+        current = { pos, senses: [] };
+        grouped.push(current);
+      }
+      if (match[2]) current.senses.push(match[2]);
+    } else if (current) {
+      current.senses.push(part);
+    }
+  }
+  return grouped.length
+    ? grouped.map(({ pos, senses }) => `${pos}. ${senses.join('；')}`).join('\n')
+    : line;
 }
 
 // CT-015: skip hover translation when the paragraph is already in the target language.
@@ -715,6 +743,35 @@ function captureSelectionAnchor(fallbackX: number, fallbackY: number): () => DOM
   return () => new DOMRect(pageX - window.scrollX, pageY - window.scrollY, 0, 0);
 }
 
+/** Capture a bounded slice of the paragraph around the selection. This gives a first-time word
+ *  lookup enough local evidence for a domain-aware explanation without translating extra text. */
+function selectionSurroundingContext(selectedText: string): string {
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0 && sel.toString().trim()) {
+    const container = sel.getRangeAt(0).startContainer;
+    const start = container instanceof Element ? container : container.parentElement;
+    const hit = start ? findParagraph(start) : null;
+    if (hit) return contextSlice(stripTags(hit.skeleton), selectedText);
+  }
+  const active = document.activeElement;
+  if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+    return contextSlice(active.value, selectedText);
+  }
+  return '';
+}
+
+function contextSlice(source: string, selectedText: string): string {
+  const normalized = source.replace(/\s+/g, ' ').trim();
+  if (!normalized || normalized === selectedText.trim()) return '';
+  const max = 1600;
+  if (normalized.length <= max) return normalized;
+  const at = normalized.toLocaleLowerCase().indexOf(selectedText.trim().toLocaleLowerCase());
+  if (at < 0) return `${normalized.slice(0, max)}…`;
+  const start = Math.max(0, at - 600);
+  const end = Math.min(normalized.length, start + max);
+  return `${start > 0 ? '…' : ''}${normalized.slice(start, end)}${end < normalized.length ? '…' : ''}`;
+}
+
 // CT-017: the active text selection for the trigger-key path. window.getSelection() misses
 // selections inside <input>/<textarea> (those don't go through the document selection), so fall
 // back to activeElement.selectionStart/End — otherwise dropping the right-click "翻译" menu item
@@ -774,25 +831,32 @@ async function main(): Promise<void> {
     selTimer = window.setTimeout(() => {
       selTimer = null;
       const has = !!currentSelectionText();
-      const selectionNode = window.getSelection()?.anchorNode;
-      const isSelectingPanel = !!selectionNode && !!panel.host.shadowRoot?.contains(selectionNode);
-      // Starting a new page selection dismisses the previous result. Preserve the panel while
-      // the user selects/copies text inside the result itself.
-      if (!isSelectingPanel) panel.hide();
       if (!has) selectionTrigger.hide();
       if (has !== selHas) { selHas = has; chrome.runtime.sendMessage({ kind: 'selectionState', has }).catch(() => {}); }
     }, 50);
   });
 
+  // The result remains interactive/selectable. Only a pointer press outside its shadow host
+  // dismisses it; selectionchange is deliberately not used because clicking or copying inside
+  // the panel can collapse/change the browser selection too.
+  document.addEventListener('pointerdown', (event) => {
+    if (event.composedPath().includes(panel.host)) return;
+    panel.hide();
+  }, { capture: true });
+
   // Reveal the action only after selection completes; form-control selections use the last
   // pointer coordinates because input/textarea selections do not expose a DOM Range rectangle.
   let selectionTriggerTimer: number | null = null;
-  const scheduleSelectionTrigger = (): void => {
+  const scheduleSelectionTrigger = (event?: Event): void => {
+    // Selecting/copying the translated result must not create another translate action or close it.
+    if (event?.composedPath().includes(panel.host)) return;
     if (selectionTriggerTimer !== null) clearTimeout(selectionTriggerTimer);
     selectionTriggerTimer = window.setTimeout(() => {
       selectionTriggerTimer = null;
       const text = currentSelectionText();
       if (!text) { selectionTrigger.hide(); return; }
+      // A completed new page selection supersedes the previous result.
+      panel.hide();
       selectionTrigger.show(text, selectionStartRect(), mx < 0 ? 8 : mx, my < 0 ? 8 : my);
     }, 0);
   };
@@ -945,9 +1009,10 @@ async function main(): Promise<void> {
     const fallbackX = mx < 0 ? 8 : mx;
     const fallbackY = my < 0 ? 8 : my;
     const anchor = captureSelectionAnchor(fallbackX, fallbackY);
+    const surroundingContext = selectionSurroundingContext(text);
     panel.start();
     panel.showAnchored(anchor, fallbackX, fallbackY);
-    runFlight('translate', () => session.buildSelectionRequest(text), {
+    runFlight('translate', () => session.buildSelectionRequest(text, surroundingContext), {
       onChunk: (full) => panel.setChunk(normalizeSelectionResult(full)),
       onReasoning: () => panel.thinking(),
       onDone: (full, usage) => {
