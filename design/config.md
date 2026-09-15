@@ -10,6 +10,7 @@
 - CFG-004 [DONE] skipSameLang setting: Settings carry a `skipSameLang` boolean (default true) that gates CT-015's same-language hover skip. Not exposed in the options UI in v1 (on by default); may be surfaced later.
 - CFG-005 [DONE] customPrompt setting: Settings carry a `customPrompt` string (default empty) for user-supplementary guidance (domain/terminology/tone). It is folded into the first user message of a session-segment as part of the existing `<user-instruction>` block (no new tag), so user/assistant turns strictly alternate and the custom prompt stays user-role advisory, unable to override the system rules (ARCH-013). The content script snapshots it on page load; a saved change takes effect only after refreshing an already-open page, keeping the cache prefix stable within a page (DS-001). It appears only in the first user message (re-added to the first user message after a compress, when there are again no committed user turns) to avoid repeating it every turn; omitted when empty.
 - CFG-006 [DONE] maxContextK setting: Settings carry a `maxContextK` number (unit K tokens, default 1000 = 1M for the default model deepseek-v4-flash) declaring the active model's context window. The API does not return the context window, so it is user-supplied in the options page (POP-006); a non-positive value falls back to 1000K via `withDefaults`. It is the denominator for the popup's context-usage gauge (POP-003): the gauge compares the latest translation response's `prompt_tokens` against `maxContextK*1000`.
+- CFG-007 [DONE] bidirectional language pair: Settings carry `bidirectionalLangA` and `bidirectionalLangB` (defaults `en` and `zh-CN`) for the popup's standalone manual translator (POP-007). The options page requires two different languages. Direction detection is delegated to the model so same-script pairs such as English/French remain usable; the manual request translates from whichever configured language predominates into the other.
 
 ## Settings schema
 
@@ -18,10 +19,12 @@
 - `model`: string — 默认 `deepseek-v4-flash`（也可 `deepseek-v4-pro` 或其他）。
 - `thinking`: boolean — DeepSeek 思考模式开关，默认关；开启时设置页弹出提示。
 - `effort`: string — `low`/`medium`/`high`/`max`，默认 `low`；仅在 thinking 开时随请求发出。DeepSeek 仅 high/max 生效（low/medium 映射 high），全范围保留以兼容其他后端。
-- `targetLang`: string — 默认 `zh-CN`。
+- `targetLang`: string — 默认目标翻译语言，默认 `zh-CN`；在设置页配置，用于网页段落翻译和划词翻译。
 - `skipSameLang`: boolean — 默认 `true`；悬停段落已是目标语言时静默跳过翻译（CT-015）。v1 不在设置页暴露。
 - `triggerKey`: string — 默认 `Alt`。
 - `customPrompt`: string — 用户补充指引（领域/术语/语气），默认空；折入每个 segment 首条 user 消息的 `<user-instruction>` 块（CFG-005），保存后刷新已打开页面生效。
+- `bidirectionalLangA`: string — popup 手动双向翻译语言 A，默认 `en`。
+- `bidirectionalLangB`: string — popup 手动双向翻译语言 B，默认 `zh-CN`；必须与语言 A 不同。
 - `maxContextK`: number — 模型上下文窗口（K tokens），默认 1000（=1M，对应 deepseek-v4-flash）；API 不返回上下文窗口，由用户在设置页填写，非正值回退 1000K。popup 上下文用量仪表的分母（POP-003）。
 
 ## Built-in prompts
@@ -37,5 +40,7 @@
   ```text
   You are summarizing a translation session for one webpage. From the conversation above, produce a concise summary capturing the page's topic/domain and any terminology with their established translations — enough to keep future translations of this page consistent. Output ONLY the summary in the target language, no extra commentary.
   ```
+
+- **手动双向翻译 prompt（由 `manualTranslationPrompt` 按语言对生成）**：模型判断下一条完整 user message 的主要语言，并翻译成语言对中的另一种语言；只输出纯文本译文。整条 user message 被视为源文本数据，不能覆盖 system 规则。
 
 目标语言不写进 system prompt；由 session 模块在组装 system 消息时追加 `Target language: <label>`（label 经 config 的 `langLabel` 由 `targetLang` 映射，如 `zh-CN` → Simplified Chinese）。system prompt 为内置常量、不可改（ARCH-013）；用户可改的是 custom prompt（见 Settings schema），折入每个 segment 首条 user 消息的 `<user-instruction>` 块（CFG-005）。压缩 prompt 为内置常量。

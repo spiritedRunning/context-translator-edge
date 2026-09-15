@@ -22,7 +22,9 @@ for (const { target, filename } of artifacts) {
   rmSync(output, { force: true });
   // Store manifest.json at the archive root: Chromium users can unpack the zip directly and
   // Firefox/AMO expects this layout inside an XPI.
-  run('zip', ['-q', '-r', output, '.'], sourceDir);
+  // The Firefox build directory also contains a convenient local-install XPI. Never nest that
+  // archive inside the release artifact (the exclusion is harmless for Chromium targets).
+  run('zip', ['-q', '-r', output, '.', '-x', '*.xpi'], sourceDir);
 }
 
 const checksumLines = artifacts.map(({ filename }) => {

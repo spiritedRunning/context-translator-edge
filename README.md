@@ -126,5 +126,5 @@ Base URL 填对应端点即可。服务商未识别的思考相关字段通常�
 - `npm run dev` — 开发模式
 - `npm run typecheck` — 类型检查
 - `npm run build` — 默认 Edge 生产构建到 `dist/`
-- `npm run build:all` — 分别构建到 `dist/edge`、`dist/chrome`、`dist/firefox`
+- `npm run build:all` — 刷新默认 `dist/`，并分别构建到 `dist/edge`、`dist/chrome`、`dist/firefox`；Firefox 同时生成 `dist/firefox/context-translator-firefox.xpi`
 - `npm run package:release` — 构建并生成三浏览器 Release 包及 SHA-256 校验文件到 `dist-zip/`

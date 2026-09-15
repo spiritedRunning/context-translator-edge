@@ -17,7 +17,7 @@ export function createManifest(target: BrowserTarget) {
   const isFirefox = target === 'firefox';
   return defineManifest({
     manifest_version: 3,
-    name: 'Context Translator',
+    name: 'Context Translator AI',
     version: VERSION,
     description: 'AI-powered contextual translation with hover, selection, and local Ollama support.',
     icons,

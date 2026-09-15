@@ -9,8 +9,8 @@
     "build": "vite build",
     "build:edge": "vite build --mode edge",
     "build:chrome": "vite build --mode chrome",
-    "build:firefox": "vite build --mode firefox",
-    "build:all": "npm run typecheck && npm run build:edge && npm run build:chrome && npm run build:firefox",
+    "build:firefox": "vite build --mode firefox && node scripts/package-firefox-xpi.mjs",
+    "build:all": "npm run typecheck && npm run build && npm run build:edge && npm run build:chrome && npm run build:firefox",
     "package:release": "node scripts/package-release.mjs",
     "typecheck": "tsc --noEmit"
   },

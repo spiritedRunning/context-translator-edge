@@ -9,6 +9,7 @@
 - BG-003 [DONE] context-dependent selection menu: the right-click menu is a single item that adapts to the selection state — "Add to context" when a text selection exists, "Add instruction" when none — so exactly one item is ever visible (a single item keeps Chrome from collapsing two extension items into an extension-name submenu). The menu no longer offers a translate action; selection translation is via the trigger key (CT-017). "Add to context" forwards the selection to the content script (→ session.addContext); "Add instruction" signals the content script to show its instruction input panel (POP-002).
 - BG-004 [DONE] usage return: the service worker returns token usage from each completion, including DeepSeek cache-hit/miss fields when present.
 - BG-005 [DONE] provider-aware thinking: DeepSeek requests carry `thinking: {type:"enabled"|"disabled"}` plus `reasoning_effort` when enabled; Ollama's OpenAI-compatible endpoint carries only `reasoning_effort` (`none` when disabled, and UI `max` maps to Ollama `high`); other compatible providers receive `reasoning_effort` only when enabled. Unsupported Ollama models return a localized actionable error.
+- BG-006 [DONE] popup manual translation transport: the popup may open the same `llm-stream` Port and submit a standalone translation message array. The service worker remains stateless and applies the same endpoint, credentials, model, streaming, and thinking settings; the popup owns display state and intentionally ignores page-session usage accounting.
 
 ## Responsibilities
 

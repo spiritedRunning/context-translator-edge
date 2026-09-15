@@ -1,13 +1,13 @@
 // Options page (POP-006): endpoint/model, thinking, general prompt, and selection-output prompt.
 // Reads/writes chrome.storage.local via the config module (shared schema with the popup).
-// Saves a partial patch so the popup-owned targetLang is left untouched.
+// Saves all persistent translation settings, including the default target language.
 import { DEFAULTS, loadSettings, saveSettings, type Settings } from '../config';
 
 const form = document.getElementById('settings') as HTMLFormElement | null;
 const status = document.getElementById('status');
 
-function field(name: string): HTMLInputElement | HTMLTextAreaElement {
-  return form!.elements.namedItem(name) as HTMLInputElement | HTMLTextAreaElement;
+function field(name: string): HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement {
+  return form!.elements.namedItem(name) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 }
 
 async function populate(): Promise<void> {
@@ -15,6 +15,7 @@ async function populate(): Promise<void> {
   (field('baseUrl') as HTMLInputElement).value = s.baseUrl;
   (field('apiKey') as HTMLInputElement).value = s.apiKey;
   (field('model') as HTMLInputElement).value = s.model;
+  (field('targetLang') as HTMLSelectElement).value = s.targetLang;
   // Trigger key is a single-select (Alt/Shift/Control); fall back to Alt if a legacy free-text
   // value is stored, so the content-script key matcher (e.key) always has a valid choice.
   const triggerRadios = form!.elements.namedItem('triggerKey') as RadioNodeList;
@@ -26,6 +27,8 @@ async function populate(): Promise<void> {
   syncEffortDisabled();
   (field('customPrompt') as HTMLTextAreaElement).value = s.customPrompt;
   (field('selectionPrompt') as HTMLTextAreaElement).value = s.selectionPrompt;
+  (field('bidirectionalLangA') as HTMLSelectElement).value = s.bidirectionalLangA;
+  (field('bidirectionalLangB') as HTMLSelectElement).value = s.bidirectionalLangB;
   (field('maxContextK') as HTMLInputElement).value = String(s.maxContextK);
 }
 
@@ -63,15 +66,24 @@ form?.addEventListener('submit', async (e) => {
   const fd = new FormData(form);
   const effortVal = String(fd.get('effort') ?? 'low');
   const maxCtxRaw = Number(fd.get('maxContextK'));
-  const patch: Pick<Settings, 'baseUrl' | 'apiKey' | 'model' | 'thinking' | 'effort' | 'triggerKey' | 'customPrompt' | 'selectionPrompt' | 'maxContextK'> = {
+  const bidirectionalLangA = String(fd.get('bidirectionalLangA') ?? 'en');
+  const bidirectionalLangB = String(fd.get('bidirectionalLangB') ?? 'zh-CN');
+  if (bidirectionalLangA === bidirectionalLangB) {
+    if (status) status.textContent = '双向翻译请选择两种不同语言';
+    return;
+  }
+  const patch: Pick<Settings, 'baseUrl' | 'apiKey' | 'model' | 'thinking' | 'effort' | 'targetLang' | 'triggerKey' | 'customPrompt' | 'selectionPrompt' | 'bidirectionalLangA' | 'bidirectionalLangB' | 'maxContextK'> = {
     baseUrl: String(fd.get('baseUrl') ?? '').trim(),
     apiKey: String(fd.get('apiKey') ?? ''),
     model: String(fd.get('model') ?? '').trim(),
+    targetLang: String(fd.get('targetLang') ?? 'zh-CN'),
     thinking: fd.get('thinking') === 'on',
     effort: ['low', 'medium', 'high', 'max'].includes(effortVal) ? effortVal : 'low',
     triggerKey: String(fd.get('triggerKey') ?? 'Alt') || 'Alt',
     customPrompt: String(fd.get('customPrompt') ?? '').trim(),
     selectionPrompt: String(fd.get('selectionPrompt') ?? '').trim(),
+    bidirectionalLangA,
+    bidirectionalLangB,
     maxContextK: Number.isFinite(maxCtxRaw) && maxCtxRaw > 0 ? Math.floor(maxCtxRaw) : DEFAULTS.maxContextK,
   };
   await saveSettings(patch);

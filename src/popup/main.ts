@@ -1,32 +1,118 @@
-// Popup quick settings (POP-001): target language + open the settings page.
-// Reads/writes chrome.storage.local via the config module; saves a partial patch so
-// the options-page-owned fields (baseUrl/apiKey/model/triggerKey/customPrompt) stay intact.
-import { DEFAULTS, loadSettings, saveSettings } from '../config';
-import type { RuntimeResponse, Usage, UsageSnapshot } from '../shared/messages';
+// Popup manual translator, settings-page entry, and current-page usage display.
+import { DEFAULTS, langLabel, loadSettings, manualTranslationPrompt } from '../config';
+import type { ChatMessage, RuntimeResponse, StreamEvent, Usage, UsageSnapshot } from '../shared/messages';
 
-const form = document.getElementById('settings') as HTMLFormElement | null;
-const status = document.getElementById('status');
 const openBtn = document.getElementById('openOptions');
+const manualInput = document.getElementById('manualInput') as HTMLTextAreaElement | null;
+const manualButton = document.getElementById('manualTranslate') as HTMLButtonElement | null;
+const manualStatus = document.getElementById('manualStatus');
+const manualResult = document.getElementById('manualResult');
+const languagePair = document.getElementById('languagePair');
 
-function targetLangField(): HTMLSelectElement {
-  return form!.elements.namedItem('targetLang') as HTMLSelectElement;
-}
+const UI_LANGUAGE_LABELS: Record<string, string> = {
+  'zh-CN': '简体中文', 'zh-TW': '繁體中文', en: 'English', ja: '日本語', ko: '한국어',
+  fr: 'Français', de: 'Deutsch', es: 'Español', ru: 'Русский',
+};
 
 async function populate(): Promise<void> {
   const s = await loadSettings();
-  targetLangField().value = s.targetLang;
+  if (languagePair) {
+    const a = UI_LANGUAGE_LABELS[s.bidirectionalLangA] ?? langLabel(s.bidirectionalLangA);
+    const b = UI_LANGUAGE_LABELS[s.bidirectionalLangB] ?? langLabel(s.bidirectionalLangB);
+    languagePair.textContent = `${a} ⇄ ${b}`;
+  }
 }
 
-form?.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  await saveSettings({ targetLang: String(new FormData(form).get('targetLang') ?? 'zh-CN') });
-  if (status) {
-    status.textContent = '已保存';
-    setTimeout(() => { if (status) status.textContent = ''; }, 1500);
+openBtn?.addEventListener('click', () => chrome.runtime.openOptionsPage());
+
+let manualRequestCounter = 0;
+let manualInFlight = false;
+
+function syncManualButton(): void {
+  if (manualButton) manualButton.disabled = manualInFlight || !manualInput?.value.trim();
+}
+
+manualInput?.addEventListener('input', syncManualButton);
+manualInput?.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !manualButton?.disabled) {
+    e.preventDefault();
+    manualButton?.click();
   }
 });
 
-openBtn?.addEventListener('click', () => chrome.runtime.openOptionsPage());
+manualButton?.addEventListener('click', async () => {
+  const source = manualInput?.value.trim();
+  if (!source || manualInFlight) return;
+  const settings = await loadSettings();
+  if (settings.bidirectionalLangA === settings.bidirectionalLangB) {
+    showManualError('请在设置中选择两种不同的双向翻译语言。');
+    return;
+  }
+
+  manualInFlight = true;
+  syncManualButton();
+  if (manualStatus) manualStatus.textContent = 'Working...';
+  if (manualResult) {
+    manualResult.hidden = false;
+    manualResult.classList.remove('error');
+    manualResult.textContent = '';
+  }
+
+  const messages: ChatMessage[] = [
+    { role: 'system', content: manualTranslationPrompt(settings.bidirectionalLangA, settings.bidirectionalLangB) },
+    { role: 'user', content: source },
+  ];
+  streamManualTranslation(messages);
+});
+
+function streamManualTranslation(messages: ChatMessage[]): void {
+  const port = chrome.runtime.connect({ name: 'llm-stream' });
+  const requestId = `popup-${++manualRequestCounter}`;
+  let buffer = '';
+  let settled = false;
+  const finish = () => {
+    manualInFlight = false;
+    syncManualButton();
+    try { port.disconnect(); } catch { /* already disconnected */ }
+  };
+  port.onMessage.addListener((evt: StreamEvent) => {
+    if (evt.requestId !== requestId || settled) return;
+    if (evt.kind === 'chunk') {
+      buffer += evt.delta;
+      if (manualResult) manualResult.textContent = buffer;
+      if (manualStatus) manualStatus.textContent = 'Translating...';
+    } else if (evt.kind === 'reasoning') {
+      if (!buffer && manualStatus) manualStatus.textContent = 'Working...';
+    } else if (evt.kind === 'done') {
+      settled = true;
+      const result = (evt.fullText || buffer).trim();
+      if (manualResult) manualResult.textContent = result;
+      if (manualStatus) manualStatus.textContent = 'Done';
+      finish();
+    } else if (evt.kind === 'error') {
+      settled = true;
+      showManualError(evt.message);
+      finish();
+    }
+  });
+  port.onDisconnect.addListener(() => {
+    if (settled) return;
+    settled = true;
+    showManualError('与服务端的连接中断');
+    manualInFlight = false;
+    syncManualButton();
+  });
+  port.postMessage({ kind: 'translate', requestId, messages });
+}
+
+function showManualError(message: string): void {
+  if (manualStatus) manualStatus.textContent = '翻译失败';
+  if (manualResult) {
+    manualResult.hidden = false;
+    manualResult.classList.add('error');
+    manualResult.textContent = message;
+  }
+}
 
 // Current-page token usage (POP-003): query the active tab's content for its session
 // usage (cumulative + last translation) and render the context gauge + cache hit rates.
